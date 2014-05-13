@@ -1,3 +1,5 @@
+"""Example module to demonstrate interfacing with Gloebit in a Flask app.
+"""
 
 from flask import Flask, request, redirect, session, url_for
 
