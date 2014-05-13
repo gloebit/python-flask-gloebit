@@ -50,7 +50,11 @@ def gloebit_callback():
     This example stores the credential in the default Flask session.  Do
     not do that in a real system!  Store it someplace secure instead.
     """
-    credential = MERCHANT.exchange_for_user_credential(request.args)
+    try:
+        credential = MERCHANT.exchange_for_user_credential(request.args)
+    except gloebit.FlowMissingError:
+        return redirect(url_for('login'))
+
     session['credential'] = credential.to_json()
 
     # Merchant scope includes 'id'.  Grab user's Gloebit username.
@@ -81,7 +85,13 @@ def purchase():
     item = request.form['size'] + " item"
     price = 1
     credential = OAuth2Credentials.from_json(session['credential'])
-    MERCHANT.purchase(credential, item, price)
+
+    try:
+        MERCHANT.purchase(credential, item, price)
+    except gloebit.AccessTokenError as e:
+        kwargs = {'msg': "Stale token! You need to Leave and Enter again"}
+        return redirect(url_for('merchant', **kwargs))
+
     return redirect(url_for('merchant', **{'msg': "You bought a " + item}))
 
 if __name__ == "__main__":
