@@ -87,7 +87,7 @@ def purchase():
     credential = OAuth2Credentials.from_json(session['credential'])
 
     try:
-        MERCHANT.purchase(credential, item, price)
+        MERCHANT.purchase_item(credential, item, price)
     except gloebit.AccessTokenError as e:
         kwargs = {'msg': "Stale token! You need to Leave and Enter again"}
         return redirect(url_for('merchant', **kwargs))
