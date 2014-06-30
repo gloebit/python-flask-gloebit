@@ -18,14 +18,14 @@ A Merchant object provides the following methods:
     The user credential contains the resource access token.
   user_info: Returns dictionary of Gloebit user information.  Requires
     user credential (from authorization steps).  Also, merchant must
-    have 'user' in its scope.
+    have 'id' in its scope.
   purchase: Performs a Gloebit purchase.  Requires user credential (from
-    authorization steps), a product name.  Also,
+    authorization steps), an item description, and an item price.  Also,
     merchant must have 'transact' in its scope.
 
 Typical flow for single-merchant service:
   1) Import gloebit module.
-  2) Create Clientsecrets object.
+  2) Create Client_secrets object.
   3) Create Merchant object using the ClientSecrets object.
   4) Per-user:
      a) Redirect user agent to Gloebit authorization URL (get URL
@@ -42,6 +42,7 @@ Typical flow for single-merchant service:
 ###   * Improve XSRF checking when exchanging code for credential.
 
 import httplib2
+import urllib
 import json
 import uuid
 import time
@@ -57,10 +58,12 @@ GLOEBIT_SERVER = 'www.gloebit.com'
 GLOEBIT_SANDBOX = 'sandbox.gloebit.com'
 GLOEBIT_OAUTH2_AUTH_URI = 'https://%s/oauth2/authorize'
 GLOEBIT_OAUTH2_TOKEN_URI = 'https://%s/oauth2/access-token'
-GLOEBIT_VISIT_URI = 'https://%s/purchase/'
 GLOEBIT_USER_URI = 'https://%s/user/'
+GLOEBIT_VISIT_URI = 'https://%s/purchase/'
+GLOEBIT_BALANCE_URI = 'https://%s/balance/'
+GLOEBIT_PRODUCTS_URI = 'https://%s/get-user-products/'
 GLOEBIT_TRANSACT_URI = 'https://%s/transact/'
-GLOEBIT_LIST_PRODUCT = 'https://%s/get-user-products/'
+GLOEBIT_CONSUME_URI = 'https://%s/consume-user-product/%s/%s/'
 
 class Error(Exception):
     """Base error for this module."""
@@ -71,11 +74,21 @@ class CrossSiteError(Error):
 class BadRequestError(Error):
     """Response error from Gloebit not 200.  Code returned in string."""
 
+class MerchantScopeError(Error):
+    """Tried to invoke a Gloebit method not in the merchant's scope."""
+
 class AccessTokenError(Error):
     """Error using access token (revoked or expired), reauthorize."""
 
 class UserInfoError(Error):
     """Error trying to lookup Gloebit user info."""
+
+class BalanceAccessError(Error):
+    """Error trying to retrieve a Gloebit user's balance."""
+
+class ProductsAccessError(Error):
+    """Error trying to retrieve a Gloebit user's product inventory or
+    consume a Gloebit user's products."""
 
 class TransactError(Error):
     """Base error for Gloebit Transact errors."""
@@ -92,7 +105,6 @@ class ClientSecrets(object):
     @util.positional(3)
     def __init__(self, client_id, client_secret,
                  redirect_uri=None, auth_uri=None, token_uri=None,
-                 visit_uri=None,
                  _sandbox=False):
         """Create a ClientSecrets.
 
@@ -106,27 +118,22 @@ class ClientSecrets(object):
             Gloebit callback with code.
           auth_uri: string, URL for Gloebit authorization method.
           token_uri: string, URL for Gloebit access token method.
-          visit_uri: string, URL to use when user visits Gloebit
           _sandbox: Boolean, Set to True to use sandbox testing server.
         """
         self.client_id = client_id
         self.client_secret = client_secret
         self.redirect_uri = redirect_uri
         self.auth_uri = auth_uri
-        self.visit_uri = visit_uri
         self.token_uri = token_uri
 
         if _sandbox:
             self.auth_uri = GLOEBIT_OAUTH2_AUTH_URI % GLOEBIT_SANDBOX
             self.token_uri = GLOEBIT_OAUTH2_TOKEN_URI % GLOEBIT_SANDBOX
-            self.visit_uri = GLOEBIT_VISIT_URI % GLOEBIT_SANDBOX
         else:
             if auth_uri is None:
                 self.auth_uri = GLOEBIT_OAUTH2_AUTH_URI % GLOEBIT_SERVER
             if token_uri is None:
                 self.token_uri = GLOEBIT_OAUTH2_TOKEN_URI % GLOEBIT_SERVER
-            if visit_uri is None:
-                self.visit_uri = GLOEBIT_VISIT_URI % GLOEBIT_SERVER
 
     @staticmethod
     @util.positional(1)
@@ -143,8 +150,8 @@ class ClientSecrets(object):
             '_sandbox': _sandbox,
         }
         return ClientSecrets(client_info['client_id'],
-                             client_info['client_secret'],
-                             **constructor_kwargs)
+                              client_info['client_secret'],
+                              **constructor_kwargs)
 
     @staticmethod
     @util.positional(0)
@@ -181,7 +188,6 @@ class Merchant(object):
         self.client_id = client_secrets.client_id
         self.client_secret = client_secrets.client_secret
         self.auth_uri = client_secrets.auth_uri
-        self.visit_uri = client_secrets.visit_uri
         self.token_uri = client_secrets.token_uri
         self.scope = scope
 
@@ -194,11 +200,16 @@ class Merchant(object):
         parsed_auth_uri = urlparse(self.auth_uri)
         hostname = parsed_auth_uri.hostname
         self.user_uri = GLOEBIT_USER_URI % hostname
+        self.visit_uri = GLOEBIT_VISIT_URI % hostname
+        self.balance_uri = GLOEBIT_BALANCE_URI % hostname
+        self.products_uri = GLOEBIT_PRODUCTS_URI % hostname
         self.transact_uri = GLOEBIT_TRANSACT_URI % hostname
         self.flow = None
 
+        self._hostname = hostname
 
-    def ready_flow (self, redirect_uri):
+
+    def ready_flow (self, redirect_uri, user):
         """ create oauth2 flow object """
         if redirect_uri is None:
             redirect_uri = self.redirect_uri
@@ -209,7 +220,18 @@ class Merchant(object):
                                         auth_uri=self.auth_uri,
                                         token_uri=self.token_uri,
                                         revoke_uri=None)
+        if user:
+            self.flow.params['state'] = \
+                xsrfutil.generate_token(self.secret_key, user)
 
+
+
+
+    @util.positional(3)
+    def _consume_uri(self, product, count):
+        """ return uri to use for consuming a product """
+        q_product = urllib.quote(product)
+        return GLOEBIT_CONSUME_URI % (self._hostname, q_product, count)
 
     @util.positional(1)
     def user_authorization_url(self, user=None, redirect_uri=None):
@@ -225,7 +247,10 @@ class Merchant(object):
           1) Currently supports http URLs only.  Thus, a non-web-based
              application's callback URI might not work.
         """
-        self.ready_flow (redirect_uri)
+        if redirect_uri is None:
+            redirect_uri = self.redirect_uri
+
+        self.ready_flow (redirect_uri, user)
 
         if user and self.secret_key is not None:
             self.flow.params['state'] = \
@@ -248,6 +273,7 @@ class Merchant(object):
         Returns:
           An Oauth2Credentials object for authorizing Gloebit requests.
         """
+        self.ready_flow (None, user)
 
         # Need better checks here.  If we have a secret key and a user, then
         # we need to expect a state and throw an error if we did not get one.
@@ -258,44 +284,41 @@ class Merchant(object):
                                            user):
                 raise CrossSiteError
 
-        self.ready_flow (None)
-
-        # The Merchant object will not have a flow if the server is
-        # restarted and the oauth2 callback is the first access!
-        #
-        # XXX figure out how to make gloebit cert work here
         http = httplib2.Http()
         http.disable_ssl_certificate_validation = True
-        credential = self.flow.step2_exchange(query_args['code'], http)
+        credential = self.flow.step2_exchange(query_args['code'], http=http)
 
         return credential
 
     @util.positional(2)
     def user_info(self, credential):
-        """Use credential to retreive Gloebit user information.
+        """Use credential to retrieve Gloebit user information.
 
         Args:
           credential: Oauth2Credentials object, Gloebit authorization credential
             acquired from 2-step authorization process (oauth2).
 
         Returns:
-          dictionary containing following key-value pairs:
+          Dictionary containing following key-value pairs:
             id: Gloebit unique identifier for user.
             name: User-selected character name for your merchant app.
             params: I don't know yet...
 
         Raises:
-          UserInfoError if the request returns a status other than 200.
+          MerchantScopeError if 'user' not in Merchant's scope.
+          BadRequestError if Gloebit returned any code other than 200.
+          AccessTokenError if access token has expired or is otherwise
+            invalid.
+          UserInfoError if Gloebit returned 200 status with False success and
+            a failure reason other than access token error.
         """
         if "user" not in self.scope:
-            return None
+            raise MerchantScopeError
 
         access_token = credential.access_token
 
-        # Should the Server object handle the http request instead of
-        # getting the uri from it and handling the request here?
         http = httplib2.Http()
-        http.disable_ssl_certificate_validation = True # XXX
+        http.disable_ssl_certificate_validation = True
         resp, response_json = http.request(
             uri=self.user_uri,
             method='GET',
@@ -308,42 +331,140 @@ class Merchant(object):
                  'name': response.get('name', None),
                  'params': response.get('params', None), }
 
-    @util.positional(4)
-    def purchase(self, credential, product, username=None):
-        """Use credential to buy predefined product at via Gloebit.
+    @util.positional(2)
+    def user_balance(self, credential):
+        """Use credential to retrieve Gloebit user balance.
 
         Args:
           credential: Oauth2Credentials object, Gloebit authorization credential
             acquired from 2-step authorization process (oauth2).
-          product: string, name of product being purchased.
-          username: string, Merchant's ID/name for purchaser.  If not given and
-            'id' is in merchant's Gloebit scope, will look up user's name and
-            use that in purchase request.
+
+        Returns:
+          User's balance as a float.
 
         Raises:
+          MerchantScopeError if 'balance' not in Merchant's scope.
+          BadRequestError if Gloebit returned any HTTP status other than 200.
+          AccessTokenError if access token has expired or is otherwise
+            invalid.
+          BalanceAccessError if Gloebit returned 200 HTTP status with False
+            success and a failure reason other than access token error.
         """
+        if "balance" not in self.scope:
+            raise MerchantScopeError
+
+        access_token = credential.access_token
+
+        http = httplib2.Http()
+        http.disable_ssl_certificate_validation = True
+        resp, response_json = http.request(
+            uri=self.balance_uri,
+            method='GET',
+            headers={'Authorization': 'Bearer ' + access_token}
+        )
+
+        response = _success_check(resp, response_json, BalanceAccessError)
+        return response['balance']
+
+    @util.positional(2)
+    def user_products(self, credential):
+        """Use credential to retrieve Gloebit user product inventory.
+
+        Args:
+          credential: Oauth2Credentials object, Gloebit authorization credential
+            acquired from 2-step authorization process (oauth2).
+
+        Returns:
+          User's product inventory as a dictionary.
+
+        Raises:
+          MerchantScopeError if 'inventory' not in Merchant's scope.
+          BadRequestError if Gloebit returned any HTTP status other than 200.
+          AccessTokenError if access token has expired or is otherwise
+            invalid.
+          ProductsAccessError if Gloebit returned 200 HTTP status with False
+            success and a failure reason other than access token error.
+        """
+        if "inventory" not in self.scope:
+            raise MerchantScopeError
+
+        access_token = credential.access_token
+
+        http = httplib2.Http()
+        http.disable_ssl_certificate_validation = True
+        resp, response_json = http.request(
+            uri=self.products_uri,
+            method='GET',
+            headers={'Authorization': 'Bearer ' + access_token}
+        )
+
+        response = _success_check(resp, response_json, ProductsAccessError)
+        return response['products']
+
+    @util.positional(4)
+    def purchase_item(self, credential, item, item_price,
+                      item_quantity=1, username=None):
+        """Use credential to buy untracked item at item_price via Gloebit.
+
+        This method is for purchasing an item that the merchant has not
+        added to the merchant's product list on Gloebit.  Thus, it requires
+        the item description and price (in Gloebits).
+
+        To purchase from the merchant's product list, use purchase_product().
+
+        Args:
+          credential: Oauth2Credentials object, Gloebit authorization credential
+            acquired from 2-step authorization process (oauth2).
+          item: string, Merchant's description of item being purchased.
+          item_price: integer, Price in G$ for each item.
+          item_quantity: integer, Number of items to purchase.
+          username: string, Merchant's ID/name for purchaser.  If not given and
+            'user' is in merchant's Gloebit scope, will look up user's name and
+            use that in purchase request.  If not given and 'user' is not in
+            merchant's Gloebit scope, an error will be raised.
+
+        Returns:
+          User's resulting balance as a float.  If 'balance' is not in
+            Merchant's, balance will be None.
+
+        Raises:
+          MerchantScopeError if 'transact' not in merchant's scope.
+          BadRequestError if Gloebit returned any HTTP status other than 200.
+          AccessTokenError if access token has expired or is otherwise
+            invalid.
+          TransactFailureError if Gloebit returned 200 HTTP status with False
+            success and a failure reason other than access token error.
+        """
+        if "transact" not in self.scope:
+            raise MerchantScopeError
+
         if not username:
             if 'user' in self.scope.split():
                 userinfo = self.user_info(credential)
                 username = userinfo['name']
             else:
-                username = 'unknown'
+                username = "Unknown"
+
 
         transaction = {
             'version':                     1,
             'id':                          str(uuid.uuid4()),
             'request-created':             int(time.time()),
-            'product':                     product,
+            'asset-code':                  item,
+            'asset-quantity':              item_quantity,
+            'asset-enact-hold-url':        None,
+            'asset-consume-hold-url':      None,
+            'asset-cancel-hold-url':       None,
+            'gloebit-balance-change':      item_price,
+            'gloebit-recipient-user-name': None,
             'consumer-key':                self.client_id,
-            'merchant-user-id':            username
+            'merchant-user-id':            username,
         }
 
         access_token = credential.access_token
 
-        # Should the Server object handle the http request instead of
-        # getting the uri from it and handling the request here?
         http = httplib2.Http()
-        http.disable_ssl_certificate_validation = True # XXX
+        http.disable_ssl_certificate_validation = True
         resp, response_json = http.request(
             uri=self.transact_uri,
             method='POST',
@@ -352,8 +473,132 @@ class Merchant(object):
             body=json.dumps(transaction),
         )
 
-        _success_check(resp, response_json, TransactFailureError)
+        response = _success_check(resp, response_json, TransactFailureError)
 
+        return response.get('balance', None)
+
+    @util.positional(3)
+    def purchase_product(self, credential, product,
+                         product_quantity=1, username=None):
+        """Use credential to buy product via Gloebit.
+
+        This method is for purchasing a product that the merchant has added
+        to the merchant's product list on Gloebit.
+
+        To purchase an untracked item, use purchase_item().
+
+        Args:
+          credential: Oauth2Credentials object, Gloebit authorization credential
+            acquired from 2-step authorization process (oauth2).
+          product: string, Merchant's name for product being purchased.  Needs
+            to match name on merchant products page.
+          product_quantity: integer, Product quantity to purchase.
+          username: string, Merchant's ID/name for purchaser.  If not given and
+            'user' is in merchant's Gloebit scope, will look up user's name and
+            use that in purchase request.  If not given and 'user' is not in
+            merchant's Gloebit scope, an error will be raised.
+
+        Returns:
+          A tuple of the user's resulting balance as a float and the user's
+            new product count after the purchase, as an int.  If 'balance'
+            is not in Merchant's scope, balance will be None.  If 'inventory'
+            is not in Merchant's scope, the count will be None.
+
+        Raises:
+          MerchantScopeError if 'transact' not in merchant's scope.
+          BadRequestError if Gloebit returned any HTTP status other than 200.
+          AccessTokenError if access token has expired or is otherwise
+            invalid.
+          TransactFailureError if Gloebit returned 200 HTTP status with False
+            success and a failure reason other than access token error.
+        """
+        if "transact" not in self.scope:
+            raise MerchantScopeError
+
+        if not username:
+            if 'user' in self.scope.split():
+                userinfo = self.user_info(credential)
+                username = userinfo['name']
+            else:
+                username = 'Unknown'
+
+        transaction = {
+            'version':                     1,
+            'id':                          str(uuid.uuid4()),
+            'request-created':             int(time.time()),
+            'product':                     product,
+            'product-quantity':            product_quantity,
+            # 'asset-enact-hold-url':        None,
+            # 'asset-consume-hold-url':      None,
+            # 'asset-cancel-hold-url':       None,
+            'gloebit-recipient-user-name': None,
+            'consumer-key':                self.client_id,
+            'merchant-user-id':            username,
+        }
+
+        access_token = credential.access_token
+
+        http = httplib2.Http()
+        http.disable_ssl_certificate_validation = True
+        resp, response_json = http.request(
+            uri=self.transact_uri,
+            method='POST',
+            headers={'Authorization': 'Bearer ' + access_token,
+                     'Content-Type': 'application/json'},
+            body=json.dumps(transaction),
+        )
+
+        response = _success_check(resp, response_json, TransactFailureError)
+
+        balance = response.get('balance', None)
+        remaining = response.get('product-count', None)
+        return (balance, remaining)
+
+    @util.positional(3)
+    def consume_product(self, credential, product, product_quantity=1):
+        """Use credential to consume user's product(s) via Gloebit.
+
+        This method is for consuming (deleting) one or more of a product that
+        the user previously purchased on Gloebit
+
+        Args:
+          credential: Oauth2Credentials object, Gloebit authorization credential
+            acquired from 2-step authorization process (oauth2).
+          product: string, Merchant's name for product being purchased.  Needs
+            to match name on merchant products page.
+          product_quantity: integer, Product quantity to purchase.
+
+        Returns:
+          User's new product count after consumption, as an int.
+
+        Raises:
+          MerchantScopeError if 'inventory' not in merchant's scope.
+          BadRequestError if Gloebit returned any HTTP status other than 200.
+          AccessTokenError if access token has expired or is otherwise
+            invalid.
+          ProductsAccessError if Gloebit returned 200 HTTP status with False
+            success and a failure reason other than access token error.
+        """
+        if "inventory" not in self.scope:
+            raise MerchantScopeError
+
+        access_token = credential.access_token
+        transaction = {}
+
+        http = httplib2.Http()
+        http.disable_ssl_certificate_validation = True
+        resp, response_json = http.request(
+            uri=self._consume_uri(product, product_quantity),
+            method='POST',
+            headers={'Authorization': 'Bearer ' + access_token,
+                     'Content-Type': 'application/json'},
+            body=json.dumps(transaction),
+        )
+
+        response = _success_check(resp, response_json, ProductsAccessError)
+        print "response: " + str(response)
+
+        return response.get('product-count', None)
 
 def _success_check(resp, response_json, exception):
     """Check response and body for success or failure.
@@ -366,18 +611,23 @@ def _success_check(resp, response_json, exception):
 
     Args:
       resp: dictionary of response headers(?).
-      response_json: JSON from response body
+      response_json: JSON from response body.
+      exception: exception to raise for unknown failure reasons.
 
     Returns:
+      Response dictionary from response_json.
 
-    Raises
+    Raises:
+      BadRequestError if Gloebit returned any HTTP status other than 200.
+      AccessTokenError if access token has expired or is otherwise invalid.
+      exception if Gloebit returned 200 HTTP status with False success and a
+        failure reason other than access token error.
     """
     if resp.status != 200:
-        raise BadRequestError\
-              ("Gloebit returned " + str(resp.status) + " status!")
+        raise BadRequestError("Gloebit returned %s status!" % str(resp.status))
 
     response = json.loads(response_json)
-
+            
     if 'success' in response.keys():
         if response['success'] != True:
             if response['reason'] == 'unknown token2':

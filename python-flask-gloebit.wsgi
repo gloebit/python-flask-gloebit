@@ -9,4 +9,4 @@ top=os.path.abspath (os.path.dirname (__file__))
 sys.path.insert (0, top)
 sys.path.insert (0, top+'/Lib')
 
-from GloebitExample import app as application
+from GloebitExample import APP as application

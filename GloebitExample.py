@@ -13,13 +13,13 @@ import urllib
 
 import gloebit
 
-app = Flask(__name__)
+APP = Flask(__name__)
 
 # For the application's secret key, do following commands and replace None
 # below with the string.  And then never let anyone know the key.
 # >>> import os
 # >>> os.urandom(24)
-app.secret_key = None
+APP.secret_key = None
 
 # Replace test-consumer's credentials with your own.
 # Cut-and-paste these from Gloebit Merchant Tools page.  Optionally, you
@@ -31,9 +31,9 @@ CLIENT_SECRET = 's3cr3t'
 # For single-user simplicity, use a global merchant object.
 MERCHANT = gloebit.Merchant(
     gloebit.ClientSecrets(CLIENT_KEY, CLIENT_SECRET, _sandbox=True),
-    secret_key=app.secret_key)
+    secret_key=APP.secret_key)
 
-@app.route('/')
+@APP.route('/')
 def index():
     """ default page """
     return '''
@@ -41,14 +41,14 @@ def index():
         <a href='%s'>Enter</a>.
     ''' % url_for('login')
 
-@app.route('/login')
+@APP.route('/login')
 def login():
     """ login page """
     session.pop('username', None)
     redirect_uri = url_for('gloebit_callback', _external=True)
     return redirect(MERCHANT.user_authorization_url(redirect_uri=redirect_uri))
 
-@app.route('/gloebit_callback')
+@APP.route('/gloebit_callback')
 def gloebit_callback():
     """Exchange code for credential.
 
@@ -67,7 +67,7 @@ def gloebit_callback():
 
     return redirect(url_for('merchant'))
 
-@app.route('/merchant')
+@APP.route('/merchant')
 def merchant():
     """ main page """
     if 'msg' in request.args:
@@ -89,7 +89,7 @@ def merchant():
                message)
 
 
-@app.route('/purchase', methods=['POST'])
+@APP.route('/purchase', methods=['POST'])
 def purchase():
     """ user submitted form from main page """
     if request.form.get ('visit', False):
@@ -102,7 +102,7 @@ def purchase():
     credential = OAuth2Credentials.from_json(session['credential'])
 
     try:
-        MERCHANT.purchase(credential, 'hat')
+        MERCHANT.purchase_product(credential, 'hat')
     except gloebit.AccessTokenError:
         kwargs = {'msg': "Stale token! You need to Leave and Enter again"}
         return redirect(url_for('merchant', **kwargs))
@@ -113,4 +113,4 @@ def purchase():
     return redirect(url_for('merchant', **{'msg': "You bought a " + item}))
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    APP.run(debug=True)
