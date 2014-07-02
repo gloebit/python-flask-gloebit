@@ -160,8 +160,8 @@ class ClientSecrets(object):
             '_sandbox': _sandbox,
         }
         return ClientSecrets(client_info['client_id'],
-                              client_info['client_secret'],
-                              **constructor_kwargs)
+                             client_info['client_secret'],
+                             **constructor_kwargs)
 
     @staticmethod
     @util.positional(0)
@@ -221,7 +221,7 @@ class Gloebit(object):
 
         self._hostname = hostname
 
-
+    @util.positional(3)
     def ready_flow (self, redirect_uri, user):
         """ create oauth2 flow object """
         if redirect_uri is None:
@@ -236,9 +236,6 @@ class Gloebit(object):
         if user:
             self.flow.params['state'] = \
                 xsrfutil.generate_token(self.secret_key, user)
-
-
-
 
     @util.positional(3)
     def _consume_uri(self, product, count):
@@ -474,7 +471,6 @@ class Gloebit(object):
                 username = userinfo['name']
             else:
                 username = "Unknown"
-
 
         transaction = {
             'version':                     1,
