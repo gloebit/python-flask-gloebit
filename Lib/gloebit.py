@@ -50,14 +50,14 @@ import time
 from urlparse import urlparse
 
 from oauth2client import clientsecrets, xsrfutil
-from oauth2client.client import OAuth2WebServerFlow
+from oauth2client.client import OAuth2WebServerFlow, AccessTokenCredentials
 
 from oauth2client import util
 
 GLOEBIT_SERVER = 'www.gloebit.com'
 # GLOEBIT_SANDBOX = 'sandbox.gloebit.com'
 GLOEBIT_SANDBOX = 'api0.gloebit.com'
-GLOEBIT_OAUTH2_AUTH_URI = 'https://%s/oauth2/authorize'
+GLOEBIT_OAUTH2_AUTH_URI = 'https://%s/oauth2/conditional-authorize'
 GLOEBIT_OAUTH2_TOKEN_URI = 'https://%s/oauth2/access-token'
 GLOEBIT_USER_URI = 'https://%s/user/'
 GLOEBIT_VISIT_URI = 'https://%s/purchase/'
@@ -69,6 +69,8 @@ GLOEBIT_DELETE_CHARACTER_URI = 'https://%s/delete-character/'
 GLOEBIT_TRANSACT_URI = 'https://%s/transact/'
 GLOEBIT_CONSUME_URI = 'https://%s/consume-user-product/%s/%s/'
 GLOEBIT_GRANT_URI = 'https://%s/grant-user-product/%s/%s/'
+
+CHECK_SSL_CERT = False
 
 class Error(Exception):
     """Base error for this module."""
@@ -303,9 +305,15 @@ class Gloebit(object):
                                            user):
                 raise CrossSiteError
 
-        http = httplib2.Http()
-        http.disable_ssl_certificate_validation = True
-        credential = self.flow.step2_exchange(query_args['code'], http=http)
+        # if query_args.has_key ('access_token'):
+        #     access_token = query_args[ 'access_token' ]
+        #     return AccessTokenCredentials (access_token, None)
+
+        else:
+            http = httplib2.Http()
+            if not CHECK_SSL_CERT:
+                http.disable_ssl_certificate_validation = True
+            credential = self.flow.step2_exchange(query_args['code'], http=http)
 
         return credential
 
@@ -337,7 +345,8 @@ class Gloebit(object):
         access_token = credential.access_token
 
         http = httplib2.Http()
-        http.disable_ssl_certificate_validation = True
+        if not CHECK_SSL_CERT:
+            http.disable_ssl_certificate_validation = True
         resp, response_json = http.request(
             uri=self.user_uri,
             method='GET',
@@ -375,7 +384,8 @@ class Gloebit(object):
         access_token = credential.access_token
 
         http = httplib2.Http()
-        http.disable_ssl_certificate_validation = True
+        if not CHECK_SSL_CERT:
+            http.disable_ssl_certificate_validation = True
         resp, response_json = http.request(
             uri=self.balance_uri,
             method='GET',
@@ -410,7 +420,8 @@ class Gloebit(object):
         access_token = credential.access_token
 
         http = httplib2.Http()
-        http.disable_ssl_certificate_validation = True
+        if not CHECK_SSL_CERT:
+            http.disable_ssl_certificate_validation = True
         resp, response_json = http.request(
             uri=self.products_uri,
             method='GET',
@@ -483,7 +494,8 @@ class Gloebit(object):
         access_token = credential.access_token
 
         http = httplib2.Http()
-        http.disable_ssl_certificate_validation = True
+        if not CHECK_SSL_CERT:
+            http.disable_ssl_certificate_validation = True
         resp, response_json = http.request(
             uri=self.transact_uri,
             method='POST',
@@ -558,7 +570,8 @@ class Gloebit(object):
         access_token = credential.access_token
 
         http = httplib2.Http()
-        http.disable_ssl_certificate_validation = True
+        if not CHECK_SSL_CERT:
+            http.disable_ssl_certificate_validation = True
         resp, response_json = http.request(
             uri=self.transact_uri,
             method='POST',
@@ -605,7 +618,8 @@ class Gloebit(object):
         transaction = {}
 
         http = httplib2.Http()
-        http.disable_ssl_certificate_validation = True
+        if not CHECK_SSL_CERT:
+            http.disable_ssl_certificate_validation = True
         resp, response_json = http.request(
             uri=self._consume_uri(product, product_quantity),
             method='POST',
@@ -652,7 +666,8 @@ class Gloebit(object):
         transaction = {}
 
         http = httplib2.Http()
-        http.disable_ssl_certificate_validation = True
+        if not CHECK_SSL_CERT:
+            http.disable_ssl_certificate_validation = True
         resp, response_json = http.request(
             uri=self._grant_uri(product, product_quantity),
             method='POST',
@@ -693,7 +708,8 @@ class Gloebit(object):
         access_token = credential.access_token
 
         http = httplib2.Http()
-        http.disable_ssl_certificate_validation = True
+        if not CHECK_SSL_CERT:
+            http.disable_ssl_certificate_validation = True
         resp, response_json = http.request(
             uri=self.characters_uri,
             method='GET',
@@ -733,7 +749,8 @@ class Gloebit(object):
             raise CharacterAccessError('character must have "name" field')
 
         http = httplib2.Http()
-        http.disable_ssl_certificate_validation = True
+        if not CHECK_SSL_CERT:
+            http.disable_ssl_certificate_validation = True
         resp, response_json = http.request(
             uri=self.update_character_uri,
             method='POST',
@@ -772,7 +789,8 @@ class Gloebit(object):
         access_token = credential.access_token
 
         http = httplib2.Http()
-        http.disable_ssl_certificate_validation = True
+        if not CHECK_SSL_CERT:
+            http.disable_ssl_certificate_validation = True
         resp, response_json = http.request(
             uri=self.delete_character_uri + character_id,
             method='GET',
