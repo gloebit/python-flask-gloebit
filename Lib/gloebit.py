@@ -55,15 +55,20 @@ from oauth2client.client import OAuth2WebServerFlow
 from oauth2client import util
 
 GLOEBIT_SERVER = 'www.gloebit.com'
-GLOEBIT_SANDBOX = 'sandbox.gloebit.com'
+# GLOEBIT_SANDBOX = 'sandbox.gloebit.com'
+GLOEBIT_SANDBOX = 'api0.gloebit.com'
 GLOEBIT_OAUTH2_AUTH_URI = 'https://%s/oauth2/authorize'
 GLOEBIT_OAUTH2_TOKEN_URI = 'https://%s/oauth2/access-token'
 GLOEBIT_USER_URI = 'https://%s/user/'
 GLOEBIT_VISIT_URI = 'https://%s/purchase/'
 GLOEBIT_BALANCE_URI = 'https://%s/balance/'
 GLOEBIT_PRODUCTS_URI = 'https://%s/get-user-products/'
+GLOEBIT_CHARACTERS_URI = 'https://%s/get-characters/'
+GLOEBIT_UPDATE_CHARACTER_URI = 'https://%s/update-character/'
+GLOEBIT_DELETE_CHARACTER_URI = 'https://%s/delete-character/'
 GLOEBIT_TRANSACT_URI = 'https://%s/transact/'
 GLOEBIT_CONSUME_URI = 'https://%s/consume-user-product/%s/%s/'
+GLOEBIT_GRANT_URI = 'https://%s/grant-user-product/%s/%s/'
 
 class Error(Exception):
     """Base error for this module."""
@@ -74,7 +79,7 @@ class CrossSiteError(Error):
 class BadRequestError(Error):
     """Response error from Gloebit not 200.  Code returned in string."""
 
-class MerchantScopeError(Error):
+class GloebitScopeError(Error):
     """Tried to invoke a Gloebit method not in the merchant's scope."""
 
 class AccessTokenError(Error):
@@ -89,6 +94,9 @@ class BalanceAccessError(Error):
 class ProductsAccessError(Error):
     """Error trying to retrieve a Gloebit user's product inventory or
     consume a Gloebit user's products."""
+
+class CharacterAccessError(Error):
+    """Error trying to retrieve a Gloebit user's character list"""
 
 class TransactError(Error):
     """Base error for Gloebit Transact errors."""
@@ -162,7 +170,7 @@ class ClientSecrets(object):
         """
         pass
 
-class Merchant(object):
+class Gloebit(object):
     """Handles tasks for Gloebit merchants."""
 
     @util.positional(2)
@@ -203,6 +211,9 @@ class Merchant(object):
         self.visit_uri = GLOEBIT_VISIT_URI % hostname
         self.balance_uri = GLOEBIT_BALANCE_URI % hostname
         self.products_uri = GLOEBIT_PRODUCTS_URI % hostname
+        self.characters_uri = GLOEBIT_CHARACTERS_URI % hostname
+        self.update_character_uri = GLOEBIT_UPDATE_CHARACTER_URI % hostname
+        self.delete_character_uri = GLOEBIT_DELETE_CHARACTER_URI % hostname
         self.transact_uri = GLOEBIT_TRANSACT_URI % hostname
         self.flow = None
 
@@ -232,6 +243,14 @@ class Merchant(object):
         """ return uri to use for consuming a product """
         q_product = urllib.quote(product)
         return GLOEBIT_CONSUME_URI % (self._hostname, q_product, count)
+
+
+    @util.positional(3)
+    def _grant_uri(self, product, count):
+        """ return uri to use for consuming a product """
+        q_product = urllib.quote(product)
+        return GLOEBIT_GRANT_URI % (self._hostname, q_product, count)
+
 
     @util.positional(1)
     def user_authorization_url(self, user=None, redirect_uri=None):
@@ -305,7 +324,7 @@ class Merchant(object):
             params: I don't know yet...
 
         Raises:
-          MerchantScopeError if 'user' not in Merchant's scope.
+          GloebitScopeError if 'user' not in Merchant's scope.
           BadRequestError if Gloebit returned any code other than 200.
           AccessTokenError if access token has expired or is otherwise
             invalid.
@@ -313,7 +332,7 @@ class Merchant(object):
             a failure reason other than access token error.
         """
         if "user" not in self.scope:
-            raise MerchantScopeError
+            raise GloebitScopeError
 
         access_token = credential.access_token
 
@@ -343,7 +362,7 @@ class Merchant(object):
           User's balance as a float.
 
         Raises:
-          MerchantScopeError if 'balance' not in Merchant's scope.
+          GloebitScopeError if 'balance' not in Merchant's scope.
           BadRequestError if Gloebit returned any HTTP status other than 200.
           AccessTokenError if access token has expired or is otherwise
             invalid.
@@ -351,7 +370,7 @@ class Merchant(object):
             success and a failure reason other than access token error.
         """
         if "balance" not in self.scope:
-            raise MerchantScopeError
+            raise GloebitScopeError
 
         access_token = credential.access_token
 
@@ -378,7 +397,7 @@ class Merchant(object):
           User's product inventory as a dictionary.
 
         Raises:
-          MerchantScopeError if 'inventory' not in Merchant's scope.
+          GloebitScopeError if 'inventory' not in Merchant's scope.
           BadRequestError if Gloebit returned any HTTP status other than 200.
           AccessTokenError if access token has expired or is otherwise
             invalid.
@@ -386,7 +405,7 @@ class Merchant(object):
             success and a failure reason other than access token error.
         """
         if "inventory" not in self.scope:
-            raise MerchantScopeError
+            raise GloebitScopeError
 
         access_token = credential.access_token
 
@@ -428,7 +447,7 @@ class Merchant(object):
             Merchant's, balance will be None.
 
         Raises:
-          MerchantScopeError if 'transact' not in merchant's scope.
+          GloebitScopeError if 'transact' not in merchant's scope.
           BadRequestError if Gloebit returned any HTTP status other than 200.
           AccessTokenError if access token has expired or is otherwise
             invalid.
@@ -436,7 +455,7 @@ class Merchant(object):
             success and a failure reason other than access token error.
         """
         if "transact" not in self.scope:
-            raise MerchantScopeError
+            raise GloebitScopeError
 
         if not username:
             if 'user' in self.scope.split():
@@ -505,7 +524,7 @@ class Merchant(object):
             is not in Merchant's scope, the count will be None.
 
         Raises:
-          MerchantScopeError if 'transact' not in merchant's scope.
+          GloebitScopeError if 'transact' not in merchant's scope.
           BadRequestError if Gloebit returned any HTTP status other than 200.
           AccessTokenError if access token has expired or is otherwise
             invalid.
@@ -513,7 +532,7 @@ class Merchant(object):
             success and a failure reason other than access token error.
         """
         if "transact" not in self.scope:
-            raise MerchantScopeError
+            raise GloebitScopeError
 
         if not username:
             if 'user' in self.scope.split():
@@ -572,7 +591,7 @@ class Merchant(object):
           User's new product count after consumption, as an int.
 
         Raises:
-          MerchantScopeError if 'inventory' not in merchant's scope.
+          GloebitScopeError if 'inventory' not in merchant's scope.
           BadRequestError if Gloebit returned any HTTP status other than 200.
           AccessTokenError if access token has expired or is otherwise
             invalid.
@@ -580,7 +599,7 @@ class Merchant(object):
             success and a failure reason other than access token error.
         """
         if "inventory" not in self.scope:
-            raise MerchantScopeError
+            raise GloebitScopeError
 
         access_token = credential.access_token
         transaction = {}
@@ -599,6 +618,170 @@ class Merchant(object):
         print "response: " + str(response)
 
         return response.get('product-count', None)
+
+
+    @util.positional(3)
+    def grant_product(self, credential, product, product_quantity=1):
+        """Use credential to grant user's product(s) via Gloebit.
+
+        This method is for consuming (deleting) one or more of a product that
+        the user previously purchased on Gloebit
+
+        Args:
+          credential: Oauth2Credentials object, Gloebit authorization credential
+            acquired from 2-step authorization process (oauth2).
+          product: string, Merchant's name for product being purchased.  Needs
+            to match name on merchant products page.
+          product_quantity: integer, Product quantity to purchase.
+
+        Returns:
+          User's new product count after consumption, as an int.
+
+        Raises:
+          GloebitScopeError if 'inventory' not in merchant's scope.
+          BadRequestError if Gloebit returned any HTTP status other than 200.
+          AccessTokenError if access token has expired or is otherwise
+            invalid.
+          ProductsAccessError if Gloebit returned 200 HTTP status with False
+            success and a failure reason other than access token error.
+        """
+        if "inventory" not in self.scope:
+            raise GloebitScopeError
+
+        access_token = credential.access_token
+        transaction = {}
+
+        http = httplib2.Http()
+        http.disable_ssl_certificate_validation = True
+        resp, response_json = http.request(
+            uri=self._grant_uri(product, product_quantity),
+            method='POST',
+            headers={'Authorization': 'Bearer ' + access_token,
+                     'Content-Type': 'application/json'},
+            body=json.dumps(transaction),
+        )
+
+        response = _success_check(resp, response_json, ProductsAccessError)
+        print "response: " + str(response)
+
+        return response.get('product-count', None)
+
+
+
+    @util.positional(2)
+    def user_characters(self, credential):
+        """Use credential to retrieve Gloebit user character list.
+
+        Args:
+          credential: Oauth2Credentials object, Gloebit authorization credential
+            acquired from 2-step authorization process (oauth2).
+
+        Returns:
+          List of user's characters, each is a dictionary.
+
+        Raises:
+          GloebitScopeError if 'character' not in Merchant's scope.
+          BadRequestError if Gloebit returned any HTTP status other than 200.
+          AccessTokenError if access token has expired or is otherwise
+            invalid.
+          CharacterAccessError if Gloebit returned 200 HTTP status with False
+            success and a failure reason other than access token error.
+        """
+        if "character" not in self.scope:
+            raise GloebitScopeError
+
+        access_token = credential.access_token
+
+        http = httplib2.Http()
+        http.disable_ssl_certificate_validation = True
+        resp, response_json = http.request(
+            uri=self.characters_uri,
+            method='GET',
+            headers={'Authorization': 'Bearer ' + access_token})
+
+        response = _success_check(resp, response_json, CharacterAccessError)
+        return response['characters']
+
+
+
+    @util.positional(3)
+    def update_character(self, credential, character):
+        """Use credential to update Gloebit user character list.
+
+        Args:
+          credential: Oauth2Credentials object, Gloebit authorization credential
+            acquired from 2-step authorization process (oauth2).
+          character: a dictionary that hold character parameters
+
+        Returns:
+          character dictionary
+
+        Raises:
+          GloebitScopeError if 'character' not in Merchant's scope.
+          BadRequestError if Gloebit returned any HTTP status other than 200.
+          AccessTokenError if access token has expired or is otherwise
+            invalid.
+          CharacterAccessError if Gloebit returned 200 HTTP status with False
+            success and a failure reason other than access token error.
+        """
+        if "character" not in self.scope:
+            raise GloebitScopeError
+
+        access_token = credential.access_token
+
+        if character.get ('name', None) == None:
+            raise CharacterAccessError('character must have "name" field')
+
+        http = httplib2.Http()
+        http.disable_ssl_certificate_validation = True
+        resp, response_json = http.request(
+            uri=self.update_character_uri,
+            method='POST',
+            headers={'Authorization': 'Bearer ' + access_token,
+                     'Content-Type': 'application/json'},
+            body=json.dumps(character))
+
+        response = _success_check(resp, response_json, CharacterAccessError)
+        character['id'] = response['id']
+        return character
+
+
+    @util.positional(3)
+    def delete_character(self, credential, character_id):
+        """Use credential to delete a user's character
+
+        Args:
+          credential: Oauth2Credentials object, Gloebit authorization credential
+            acquired from 2-step authorization process (oauth2).
+          character_id: uuid of character
+
+        Returns:
+          True
+
+        Raises:
+          GloebitScopeError if 'character' not in Merchant's scope.
+          BadRequestError if Gloebit returned any HTTP status other than 200.
+          AccessTokenError if access token has expired or is otherwise
+            invalid.
+          CharacterAccessError if Gloebit returned 200 HTTP status with False
+            success and a failure reason other than access token error.
+        """
+        if "character" not in self.scope:
+            raise GloebitScopeError
+
+        access_token = credential.access_token
+
+        http = httplib2.Http()
+        http.disable_ssl_certificate_validation = True
+        resp, response_json = http.request(
+            uri=self.delete_character_uri + character_id,
+            method='GET',
+            headers={'Authorization': 'Bearer ' + access_token})
+
+        response = _success_check(resp, response_json, CharacterAccessError)
+        return response['success']
+
+
 
 def _success_check(resp, response_json, exception):
     """Check response and body for success or failure.
@@ -627,7 +810,7 @@ def _success_check(resp, response_json, exception):
         raise BadRequestError("Gloebit returned %s status!" % str(resp.status))
 
     response = json.loads(response_json)
-            
+
     if 'success' in response.keys():
         if response['success'] != True:
             if response['reason'] == 'unknown token2':
