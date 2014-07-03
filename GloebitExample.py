@@ -125,7 +125,7 @@ def character_post():
             if new_name == '':
                 kwargs = {'msg': "character name can't be blank"}
                 return redirect(url_for('character_select', **kwargs))
-            character = GLOEBIT.update_character \
+            character = GLOEBIT.create_character \
                         (credentials, {'name':new_name,
                                        'color':new_color})
             session['character-name'] = character['name']

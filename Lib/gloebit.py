@@ -63,6 +63,7 @@ GLOEBIT_USER_URI = 'https://%s/user/'
 GLOEBIT_VISIT_URI = 'https://%s/purchase/'
 GLOEBIT_BALANCE_URI = 'https://%s/balance/'
 GLOEBIT_CHARACTERS_URI = 'https://%s/get-characters/'
+GLOEBIT_CREATE_CHARACTER_URI = 'https://%s/create-character/'
 GLOEBIT_UPDATE_CHARACTER_URI = 'https://%s/update-character/'
 GLOEBIT_DELETE_CHARACTER_URI = 'https://%s/delete-character/'
 GLOEBIT_TRANSACT_URI = 'https://%s/transact/'
@@ -217,6 +218,7 @@ class Gloebit(object):
         self.visit_uri = GLOEBIT_VISIT_URI % hostname
         self.balance_uri = GLOEBIT_BALANCE_URI % hostname
         self.characters_uri = GLOEBIT_CHARACTERS_URI % hostname
+        self.create_character_uri = GLOEBIT_CREATE_CHARACTER_URI % hostname
         self.update_character_uri = GLOEBIT_UPDATE_CHARACTER_URI % hostname
         self.delete_character_uri = GLOEBIT_DELETE_CHARACTER_URI % hostname
         self.transact_uri = GLOEBIT_TRANSACT_URI % hostname
@@ -485,7 +487,7 @@ class Gloebit(object):
         return response.get('balance', None)
 
 
-    @util.positional(2)
+    @util.positional(3)
     def get_products(self, credential, character_id):
         """Use credential to retrieve Gloebit user product inventory.
 
@@ -626,7 +628,7 @@ class Gloebit(object):
 
 
 
-    @util.positional(3)
+    @util.positional(4)
     def purchase_character_product(self, credential, character_id, product,
                                    product_quantity=1, username=None):
         """ purchase a product for a character """
@@ -803,8 +805,51 @@ class Gloebit(object):
 
 
     @util.positional(3)
+    def create_character(self, credential, character):
+        """Use credential to create Gloebit user character.
+
+        Args:
+          credential: Oauth2Credentials object, Gloebit authorization credential
+            acquired from 2-step authorization process (oauth2).
+          character: a dictionary that hold character parameters
+
+        Returns:
+          character dictionary
+
+        Raises:
+          GloebitScopeError if 'character' not in Merchant's scope.
+          BadRequestError if Gloebit returned any HTTP status other than 200.
+          AccessTokenError if access token has expired or is otherwise
+            invalid.
+          CharacterAccessError if Gloebit returned 200 HTTP status with False
+            success and a failure reason other than access token error.
+        """
+        if "character" not in self.scope:
+            raise GloebitScopeError
+
+        access_token = credential.access_token
+
+        if character.get ('name', None) == None:
+            raise CharacterAccessError('character must have "name" field')
+
+        http = httplib2.Http()
+        if not CHECK_SSL_CERT:
+            http.disable_ssl_certificate_validation = True
+        resp, response_json = http.request(
+            uri=self.create_character_uri,
+            method='POST',
+            headers={'Authorization': 'Bearer ' + access_token,
+                     'Content-Type': 'application/json'},
+            body=json.dumps(character))
+
+        response = _success_check(resp, response_json, CharacterAccessError)
+        return response['character']
+
+
+
+    @util.positional(3)
     def update_character(self, credential, character):
-        """Use credential to update Gloebit user character list.
+        """Use credential to update Gloebit user character.
 
         Args:
           credential: Oauth2Credentials object, Gloebit authorization credential
@@ -841,8 +886,7 @@ class Gloebit(object):
             body=json.dumps(character))
 
         response = _success_check(resp, response_json, CharacterAccessError)
-        character['id'] = response['id']
-        return character
+        return response['character']
 
 
     @util.positional(3)
