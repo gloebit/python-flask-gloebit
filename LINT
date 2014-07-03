@@ -1,0 +1,15 @@
+#!/bin/bash
+
+function run_lint {
+PYTHONPATH='.:Lib' pylint --reports=n $1 2>&1 |
+  grep -v 'No config file found' |
+  grep -v 'TODO' |
+  grep -v 'Too many arguments' |
+  grep -v 'Too many instance attributes' |
+  grep -v 'Too many public' |
+  grep -v 'Too many return statements' |
+  grep -v magic
+}
+
+run_lint Lib/gloebit.py
+run_lint GloebitExample.py

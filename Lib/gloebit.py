@@ -50,7 +50,7 @@ import time
 from urlparse import urlparse
 
 from oauth2client import clientsecrets, xsrfutil
-from oauth2client.client import OAuth2WebServerFlow, AccessTokenCredentials
+from oauth2client.client import OAuth2WebServerFlow
 
 from oauth2client import util
 
@@ -62,13 +62,16 @@ GLOEBIT_OAUTH2_TOKEN_URI = 'https://%s/oauth2/access-token'
 GLOEBIT_USER_URI = 'https://%s/user/'
 GLOEBIT_VISIT_URI = 'https://%s/purchase/'
 GLOEBIT_BALANCE_URI = 'https://%s/balance/'
-GLOEBIT_PRODUCTS_URI = 'https://%s/get-user-products/'
 GLOEBIT_CHARACTERS_URI = 'https://%s/get-characters/'
 GLOEBIT_UPDATE_CHARACTER_URI = 'https://%s/update-character/'
 GLOEBIT_DELETE_CHARACTER_URI = 'https://%s/delete-character/'
 GLOEBIT_TRANSACT_URI = 'https://%s/transact/'
-GLOEBIT_CONSUME_URI = 'https://%s/consume-user-product/%s/%s/'
-GLOEBIT_GRANT_URI = 'https://%s/grant-user-product/%s/%s/'
+GLOEBIT_USER_PRODUCTS_URI = 'https://%s/get-user-products/'
+GLOEBIT_USER_CONSUME_URI = 'https://%s/consume-user-product/%s/%s/'
+GLOEBIT_USER_GRANT_URI = 'https://%s/grant-user-product/%s/%s/'
+GLOEBIT_CHARACTER_PRODUCTS_URI = 'https://%s/get-character-products/%s/'
+GLOEBIT_CHARACTER_CONSUME_URI = 'https://%s/consume-character-product/%s/%s/%s/'
+GLOEBIT_CHARACTER_GRANT_URI = 'https://%s/grant-character-product/%s/%s/%s/'
 
 CHECK_SSL_CERT = False
 
@@ -152,7 +155,8 @@ class ClientSecrets(object):
 
         Very closely resembles oauth2client.client.flow_from_clientsecrets().
         """
-        client_type, client_info = clientsecrets.loadfile(filename, cache=cache)
+        _client_type, client_info = \
+                      clientsecrets.loadfile(filename, cache=cache)
         constructor_kwargs = {
             'redirect_uri': redirect_uri,
             'auth_uri': client_info['auth_uri'],
@@ -212,7 +216,6 @@ class Gloebit(object):
         self.user_uri = GLOEBIT_USER_URI % hostname
         self.visit_uri = GLOEBIT_VISIT_URI % hostname
         self.balance_uri = GLOEBIT_BALANCE_URI % hostname
-        self.products_uri = GLOEBIT_PRODUCTS_URI % hostname
         self.characters_uri = GLOEBIT_CHARACTERS_URI % hostname
         self.update_character_uri = GLOEBIT_UPDATE_CHARACTER_URI % hostname
         self.delete_character_uri = GLOEBIT_DELETE_CHARACTER_URI % hostname
@@ -238,17 +241,35 @@ class Gloebit(object):
                 xsrfutil.generate_token(self.secret_key, user)
 
     @util.positional(3)
-    def _consume_uri(self, product, count):
+    def _products_uri(self, character_id):
         """ return uri to use for consuming a product """
-        q_product = urllib.quote(product)
-        return GLOEBIT_CONSUME_URI % (self._hostname, q_product, count)
+        if character_id:
+            q_character_id = urllib.quote(character_id)
+            return GLOEBIT_CHARACTER_PRODUCTS_URI % \
+                   (self._hostname, q_character_id)
+        return GLOEBIT_USER_PRODUCTS_URI % (self._hostname)
 
 
     @util.positional(3)
-    def _grant_uri(self, product, count):
+    def _consume_uri(self, character_id, product, count):
         """ return uri to use for consuming a product """
         q_product = urllib.quote(product)
-        return GLOEBIT_GRANT_URI % (self._hostname, q_product, count)
+        if character_id:
+            q_character_id = urllib.quote(character_id)
+            return GLOEBIT_CHARACTER_CONSUME_URI % \
+                   (self._hostname, q_character_id, q_product, count)
+        return GLOEBIT_USER_CONSUME_URI % (self._hostname, q_product, count)
+
+
+    @util.positional(3)
+    def _grant_uri(self, character_id, product, count):
+        """ return uri to use for consuming a product """
+        q_product = urllib.quote(product)
+        if character_id:
+            q_character_id = urllib.quote(character_id)
+            return GLOEBIT_CHARACTER_GRANT_URI % \
+                   (self._hostname, q_character_id, q_product, count)
+        return GLOEBIT_USER_GRANT_URI % (self._hostname, q_product, count)
 
 
     @util.positional(1)
@@ -302,15 +323,10 @@ class Gloebit(object):
                                            user):
                 raise CrossSiteError
 
-        # if query_args.has_key ('access_token'):
-        #     access_token = query_args[ 'access_token' ]
-        #     return AccessTokenCredentials (access_token, None)
-
-        else:
-            http = httplib2.Http()
-            if not CHECK_SSL_CERT:
-                http.disable_ssl_certificate_validation = True
-            credential = self.flow.step2_exchange(query_args['code'], http=http)
+        http = httplib2.Http()
+        if not CHECK_SSL_CERT:
+            http.disable_ssl_certificate_validation = True
+        credential = self.flow.step2_exchange(query_args['code'], http=http)
 
         return credential
 
@@ -353,8 +369,7 @@ class Gloebit(object):
         response = _success_check(resp, response_json, UserInfoError)
 
         return { 'id': response.get('id', None),
-                 'name': response.get('name', None),
-                 'params': response.get('params', None), }
+                 'name': response.get('full-name', None) }
 
     @util.positional(2)
     def user_balance(self, credential):
@@ -392,41 +407,6 @@ class Gloebit(object):
         response = _success_check(resp, response_json, BalanceAccessError)
         return response['balance']
 
-    @util.positional(2)
-    def user_products(self, credential):
-        """Use credential to retrieve Gloebit user product inventory.
-
-        Args:
-          credential: Oauth2Credentials object, Gloebit authorization credential
-            acquired from 2-step authorization process (oauth2).
-
-        Returns:
-          User's product inventory as a dictionary.
-
-        Raises:
-          GloebitScopeError if 'inventory' not in Merchant's scope.
-          BadRequestError if Gloebit returned any HTTP status other than 200.
-          AccessTokenError if access token has expired or is otherwise
-            invalid.
-          ProductsAccessError if Gloebit returned 200 HTTP status with False
-            success and a failure reason other than access token error.
-        """
-        if "inventory" not in self.scope:
-            raise GloebitScopeError
-
-        access_token = credential.access_token
-
-        http = httplib2.Http()
-        if not CHECK_SSL_CERT:
-            http.disable_ssl_certificate_validation = True
-        resp, response_json = http.request(
-            uri=self.products_uri,
-            method='GET',
-            headers={'Authorization': 'Bearer ' + access_token}
-        )
-
-        response = _success_check(resp, response_json, ProductsAccessError)
-        return response['products']
 
     @util.positional(4)
     def purchase_item(self, credential, item, item_price,
@@ -504,8 +484,59 @@ class Gloebit(object):
 
         return response.get('balance', None)
 
+
+    @util.positional(2)
+    def get_products(self, credential, character_id):
+        """Use credential to retrieve Gloebit user product inventory.
+
+        Args:
+          credential: Oauth2Credentials object, Gloebit authorization credential
+            acquired from 2-step authorization process (oauth2).
+
+        Returns:
+          User's product inventory as a dictionary.
+
+        Raises:
+          GloebitScopeError if 'inventory' not in Merchant's scope.
+          BadRequestError if Gloebit returned any HTTP status other than 200.
+          AccessTokenError if access token has expired or is otherwise
+            invalid.
+          ProductsAccessError if Gloebit returned 200 HTTP status with False
+            success and a failure reason other than access token error.
+        """
+        if "inventory" not in self.scope:
+            raise GloebitScopeError
+
+        access_token = credential.access_token
+
+        http = httplib2.Http()
+        if not CHECK_SSL_CERT:
+            http.disable_ssl_certificate_validation = True
+
+        resp, response_json = http.request(
+            uri=self._products_uri (character_id),
+            method='GET',
+            headers={'Authorization': 'Bearer ' + access_token}
+        )
+
+        response = _success_check(resp, response_json, ProductsAccessError)
+        return response['products']
+
+
+    @util.positional(2)
+    def user_products(self, credential):
+        """ list products associated with a gloebit user """
+        return self.get_products (credential, None)
+
+
     @util.positional(3)
-    def purchase_product(self, credential, product,
+    def character_products(self, credential, character_id):
+        """ list products associated with a gloebit user """
+        return self.get_products (credential, character_id)
+
+
+    @util.positional(4)
+    def purchase_product(self, credential, character_id, product,
                          product_quantity=1, username=None):
         """Use credential to buy product via Gloebit.
 
@@ -558,10 +589,13 @@ class Gloebit(object):
             # 'asset-enact-hold-url':        None,
             # 'asset-consume-hold-url':      None,
             # 'asset-cancel-hold-url':       None,
-            'gloebit-recipient-user-name': None,
+            # 'gloebit-recipient-user-name': None,
             'consumer-key':                self.client_id,
             'merchant-user-id':            username,
         }
+
+        if character_id:
+            transaction['character-id'] = character_id
 
         access_token = credential.access_token
 
@@ -582,8 +616,28 @@ class Gloebit(object):
         remaining = response.get('product-count', None)
         return (balance, remaining)
 
+
     @util.positional(3)
-    def consume_product(self, credential, product, product_quantity=1):
+    def purchase_user_product(self, credential, product,
+                              product_quantity=1, username=None):
+        """ purchase a product for a user """
+        return self.purchase_product(credential, None, product,
+                                     product_quantity, username)
+
+
+
+    @util.positional(3)
+    def purchase_character_product(self, credential, character_id, product,
+                                   product_quantity=1, username=None):
+        """ purchase a product for a character """
+        return self.purchase_product(credential, character_id, product,
+                                     product_quantity, username)
+
+
+
+    @util.positional(4)
+    def consume_product(self, credential, character_id, product,
+                        product_quantity=1):
         """Use credential to consume user's product(s) via Gloebit.
 
         This method is for consuming (deleting) one or more of a product that
@@ -617,7 +671,7 @@ class Gloebit(object):
         if not CHECK_SSL_CERT:
             http.disable_ssl_certificate_validation = True
         resp, response_json = http.request(
-            uri=self._consume_uri(product, product_quantity),
+            uri=self._consume_uri(character_id, product, product_quantity),
             method='POST',
             headers={'Authorization': 'Bearer ' + access_token,
                      'Content-Type': 'application/json'},
@@ -630,8 +684,25 @@ class Gloebit(object):
         return response.get('product-count', None)
 
 
-    @util.positional(3)
-    def grant_product(self, credential, product, product_quantity=1):
+    @util.positional(4)
+    def consume_user_product(self, credential, product, product_quantity=1):
+        """ decrement product count for a user """
+        return self.consume_product(credential, None, product,
+                                    product_quantity)
+
+
+    @util.positional(4)
+    def consume_character_product(self, credential, character_id, product,
+                                  product_quantity=1):
+        """ decrement product count for a character """
+        return self.consume_product(credential, character_id, product,
+                                    product_quantity)
+
+
+
+    @util.positional(4)
+    def grant_product(self, credential, character_id,
+                      product, product_quantity=1):
         """Use credential to grant user's product(s) via Gloebit.
 
         This method is for consuming (deleting) one or more of a product that
@@ -665,7 +736,7 @@ class Gloebit(object):
         if not CHECK_SSL_CERT:
             http.disable_ssl_certificate_validation = True
         resp, response_json = http.request(
-            uri=self._grant_uri(product, product_quantity),
+            uri=self._grant_uri(character_id, product, product_quantity),
             method='POST',
             headers={'Authorization': 'Bearer ' + access_token,
                      'Content-Type': 'application/json'},
@@ -676,6 +747,21 @@ class Gloebit(object):
         print "response: " + str(response)
 
         return response.get('product-count', None)
+
+
+    @util.positional(4)
+    def grant_user_product(self, credential, product, product_quantity=1):
+        """ increment count of user product """
+        return self.grant_product(credential, None,
+                                  product, product_quantity)
+
+
+    @util.positional(4)
+    def grant_character_product(self, credential, character_id,
+                                product, product_quantity=1):
+        """ increment count of character product """
+        return self.grant_product(credential, character_id,
+                                  product, product_quantity)
 
 
 

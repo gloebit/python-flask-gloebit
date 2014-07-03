@@ -129,11 +129,13 @@ def character_post():
                         (credentials, {'name':new_name,
                                        'color':new_color})
             session['character-name'] = character['name']
+            session['character-id'] = character['id']
         else:
             characters = GLOEBIT.user_characters (credentials)
             for character in characters:
                 if request.form.get ('select-'+character['id'], False):
                     session['character-name'] = character['name']
+                    session['character-id'] = character['id']
                 if request.form.get ('delete-'+character['id'], False):
                     GLOEBIT.delete_character (credentials, character['id'])
                     return redirect(url_for('character_select'))
@@ -159,7 +161,9 @@ def main():
 
 
     credential = OAuth2Credentials.from_json(session['credential'])
-    products = GLOEBIT.user_products (credential)
+    user_products = GLOEBIT.user_products (credential)
+    character_products = GLOEBIT.character_products \
+                         (credential, session['character-id'])
 
     page = '''
         <h1>Gloebit Flask Example</h1>
@@ -171,23 +175,50 @@ def main():
                session['character-name'],
                url_for('purchase'))
 
+    page += '<h3>User<h3>'
     page += '<form action="%s" method="post">' % url_for('purchase')
     page += '<table>'
     for name in ALL_PRODUCTS:
         page += '''<tr>'''
         page += '''<td>%s</td>''' % (name)
-        page += '''<td>%s</td>''' % (products.get (name, 0))
+        page += '''<td>%s</td>''' % (user_products.get (name, 0))
         page += '''<td>
-        <input type="submit" name="grant-%s" value="Grant" /></td>''' % (name)
+        <input type="submit" name="user-grant-%s" value="Grant" /></td>''' % \
+        (name)
         page += '''<td>
-          <input type="submit" name="consume-%s" value="Consume" /></td>''' % \
+          <input type="submit" name="user-consume-%s"
+                 value="Consume" /></td>''' % \
           (name)
         page += '''<td>
-          <input type="submit" name="buy-%s" value="Buy" /></td>''' % \
+          <input type="submit" name="user-buy-%s" value="Buy" /></td>''' % \
           (name)
         page += '''</tr>'''
     page += '''</table>'''
     page += '</form>'
+
+
+    page += '<h3>Character<h3>'
+    page += '<form action="%s" method="post">' % url_for('purchase')
+    page += '<table>'
+    for name in ALL_PRODUCTS:
+        page += '''<tr>'''
+        page += '''<td>%s</td>''' % (name)
+        page += '''<td>%s</td>''' % (character_products.get (name, 0))
+        page += '''<td>
+        <input type="submit" name="character-grant-%s"
+               value="Grant" /></td>''' % (name)
+        page += '''<td>
+          <input type="submit" name="character-consume-%s"
+                 value="Consume" /></td>''' % \
+          (name)
+        page += '''<td>
+          <input type="submit" name="character-buy-%s"
+                 value="Buy" /></td>''' % \
+          (name)
+        page += '''</tr>'''
+    page += '''</table>'''
+    page += '</form>'
+
 
     page +='''<p>%s.</p>
         <p><a href="/">Leave</a></p>
@@ -206,17 +237,34 @@ def purchase():
                         urllib.quote(url_for('main', _external=True)) +
                         '&r=' + urllib.quote(CLIENT_KEY))
 
+    character_id = session[ 'character-id' ]
+
     for name in ALL_PRODUCTS:
         try:
-            if request.form.get ('grant-%s' % name, False):
-                GLOEBIT.grant_product (credential, name)
+            if request.form.get ('user-grant-%s' % name, False):
+                GLOEBIT.grant_user_product (credential, name)
                 return redirect(url_for('main', **{'msg': "granted " + name}))
-            if request.form.get ('consume-%s' % name, False):
-                GLOEBIT.consume_product (credential, name)
+            if request.form.get ('character-grant-%s' % name, False):
+                GLOEBIT.grant_character_product \
+                        (credential, character_id, name)
+                return redirect(url_for('main', **{'msg': "granted " + name}))
+
+            if request.form.get ('user-consume-%s' % name, False):
+                GLOEBIT.consume_user_product (credential, name)
                 return redirect(url_for('main', **{'msg': "consume " + name}))
-            if request.form.get ('buy-%s' % name, False):
-                GLOEBIT.purchase_product (credential, name)
+            if request.form.get ('character-consume-%s' % name, False):
+                GLOEBIT.consume_character_product \
+                        (credential, character_id, name)
+                return redirect(url_for('main', **{'msg': "consume " + name}))
+
+            if request.form.get ('user-buy-%s' % name, False):
+                GLOEBIT.purchase_user_product (credential, name)
                 return redirect(url_for('main', **{'msg': "buy " + name}))
+            if request.form.get ('character-buy-%s' % name, False):
+                GLOEBIT.purchase_character_product \
+                        (credential, character_id, name)
+                return redirect(url_for('main', **{'msg': "buy " + name}))
+
         except gloebit.TransactFailureError as exn:
             kwargs = {'msg': name + ': ' + str (exn)}
             return redirect(url_for('main', **kwargs))
