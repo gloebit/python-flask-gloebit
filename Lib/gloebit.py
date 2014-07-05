@@ -242,7 +242,7 @@ class Gloebit(object):
             self.flow.params['state'] = \
                 xsrfutil.generate_token(self.secret_key, user)
 
-    @util.positional(3)
+    @util.positional(2)
     def _products_uri(self, character_id):
         """ return uri to use for consuming a product """
         if character_id:
@@ -252,7 +252,7 @@ class Gloebit(object):
         return GLOEBIT_USER_PRODUCTS_URI % (self._hostname)
 
 
-    @util.positional(3)
+    @util.positional(4)
     def _consume_uri(self, character_id, product, count):
         """ return uri to use for consuming a product """
         q_product = urllib.quote(product)
@@ -263,7 +263,7 @@ class Gloebit(object):
         return GLOEBIT_USER_CONSUME_URI % (self._hostname, q_product, count)
 
 
-    @util.positional(3)
+    @util.positional(4)
     def _grant_uri(self, character_id, product, count):
         """ return uri to use for consuming a product """
         q_product = urllib.quote(product)
@@ -624,7 +624,8 @@ class Gloebit(object):
                               product_quantity=1, username=None):
         """ purchase a product for a user """
         return self.purchase_product(credential, None, product,
-                                     product_quantity, username)
+                                     product_quantity=product_quantity,
+                                     username=username)
 
 
 
@@ -633,7 +634,8 @@ class Gloebit(object):
                                    product_quantity=1, username=None):
         """ purchase a product for a character """
         return self.purchase_product(credential, character_id, product,
-                                     product_quantity, username)
+                                     product_quantity=product_quantity,
+                                     username=username)
 
 
 
