@@ -55,8 +55,7 @@ from oauth2client.client import OAuth2WebServerFlow
 from oauth2client import util
 
 GLOEBIT_SERVER = 'www.gloebit.com'
-# GLOEBIT_SANDBOX = 'sandbox.gloebit.com'
-GLOEBIT_SANDBOX = 'api0.gloebit.com'
+GLOEBIT_SANDBOX = 'sandbox.gloebit.com'
 GLOEBIT_OAUTH2_AUTH_URI = 'https://%s/oauth2/conditional-authorize'
 GLOEBIT_OAUTH2_TOKEN_URI = 'https://%s/oauth2/access-token'
 GLOEBIT_USER_URI = 'https://%s/user/'
