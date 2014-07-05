@@ -55,7 +55,8 @@ from oauth2client.client import OAuth2WebServerFlow
 from oauth2client import util
 
 GLOEBIT_SERVER = 'www.gloebit.com'
-GLOEBIT_SANDBOX = 'sandbox.gloebit.com'
+# GLOEBIT_SANDBOX = 'sandbox.gloebit.com'
+GLOEBIT_SANDBOX = 'api0.gloebit.com'
 GLOEBIT_OAUTH2_AUTH_URI = 'https://%s/oauth2/conditional-authorize'
 GLOEBIT_OAUTH2_TOKEN_URI = 'https://%s/oauth2/access-token'
 GLOEBIT_USER_URI = 'https://%s/user/'
@@ -756,7 +757,7 @@ class Gloebit(object):
     def grant_user_product(self, credential, product, product_quantity=1):
         """ increment count of user product """
         return self.grant_product(credential, None,
-                                  product, product_quantity)
+                                  product, product_quantity=product_quantity)
 
 
     @util.positional(4)
@@ -764,7 +765,7 @@ class Gloebit(object):
                                 product, product_quantity=1):
         """ increment count of character product """
         return self.grant_product(credential, character_id,
-                                  product, product_quantity)
+                                  product, product_quantity=product_quantity)
 
 
 
