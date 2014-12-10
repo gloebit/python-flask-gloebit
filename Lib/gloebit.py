@@ -1,4 +1,4 @@
-"""Module for handling client (merchant) interactions with Gloebit.
+"""Module for handling Gloebit merchant interactions.
 
 Interactions are handled by Merchant class objects, one object per merchant.
 
@@ -18,14 +18,14 @@ A Merchant object provides the following methods:
     The user credential contains the resource access token.
   user_info: Returns dictionary of Gloebit user information.  Requires
     user credential (from authorization steps).  Also, merchant must
-    have 'id' in its scope.
+    have 'user' in its scope.
   purchase: Performs a Gloebit purchase.  Requires user credential (from
     authorization steps), an item description, and an item price.  Also,
     merchant must have 'transact' in its scope.
 
 Typical flow for single-merchant service:
   1) Import gloebit module.
-  2) Create Client_secrets object.
+  2) Create ClientSecrets object.
   3) Create Merchant object using the ClientSecrets object.
   4) Per-user:
      a) Redirect user agent to Gloebit authorization URL (get URL
@@ -56,7 +56,8 @@ from oauth2client import util
 
 GLOEBIT_SERVER = 'www.gloebit.com'
 GLOEBIT_SANDBOX = 'sandbox.gloebit.com'
-GLOEBIT_OAUTH2_AUTH_URI = 'https://%s/oauth2/conditional-authorize'
+GLOEBIT_OAUTH2_AUTH_URI = 'https://%s/oauth2/authorize'
+GLOEBIT_OAUTH2_COND_AUTH_URI = 'https://%s/oauth2/conditional-authorize'
 GLOEBIT_OAUTH2_TOKEN_URI = 'https://%s/oauth2/access-token'
 GLOEBIT_USER_URI = 'https://%s/user/'
 GLOEBIT_VISIT_URI = 'https://%s/purchase/'
@@ -250,7 +251,6 @@ class Gloebit(object):
                    (self._hostname, q_character_id)
         return GLOEBIT_USER_PRODUCTS_URI % (self._hostname)
 
-
     @util.positional(4)
     def _consume_uri(self, character_id, product, count):
         """ return uri to use for consuming a product """
@@ -261,7 +261,6 @@ class Gloebit(object):
                    (self._hostname, q_character_id, q_product, count)
         return GLOEBIT_USER_CONSUME_URI % (self._hostname, q_product, count)
 
-
     @util.positional(4)
     def _grant_uri(self, character_id, product, count):
         """ return uri to use for consuming a product """
@@ -271,7 +270,6 @@ class Gloebit(object):
             return GLOEBIT_CHARACTER_GRANT_URI % \
                    (self._hostname, q_character_id, q_product, count)
         return GLOEBIT_USER_GRANT_URI % (self._hostname, q_product, count)
-
 
     @util.positional(1)
     def user_authorization_url(self, user=None, redirect_uri=None):
@@ -408,7 +406,6 @@ class Gloebit(object):
         response = _success_check(resp, response_json, BalanceAccessError)
         return response['balance']
 
-
     @util.positional(4)
     def purchase_item(self, credential, item, item_price,
                       item_quantity=1, username=None):
@@ -418,7 +415,8 @@ class Gloebit(object):
         added to the merchant's product list on Gloebit.  Thus, it requires
         the item description and price (in Gloebits).
 
-        To purchase from the merchant's product list, use purchase_product().
+        To purchase from the merchant's product list, use either
+        purchase_user_product() or purchase_character_product().
 
         Args:
           credential: Oauth2Credentials object, Gloebit authorization credential
@@ -453,6 +451,8 @@ class Gloebit(object):
             else:
                 username = "Unknown"
 
+        total_cost = item_price * item_quantity
+
         transaction = {
             'version':                     1,
             'id':                          str(uuid.uuid4()),
@@ -462,10 +462,10 @@ class Gloebit(object):
             'asset-enact-hold-url':        None,
             'asset-consume-hold-url':      None,
             'asset-cancel-hold-url':       None,
-            'gloebit-balance-change':      item_price,
+            'gloebit-balance-change':      total_cost,
             'gloebit-recipient-user-name': None,
             'consumer-key':                self.client_id,
-            'merchant-user-id':            username,
+            'username-on-application':     username,
         }
 
         access_token = credential.access_token
@@ -485,14 +485,14 @@ class Gloebit(object):
 
         return response.get('balance', None)
 
-
-    @util.positional(3)
-    def get_products(self, credential, character_id):
+    @util.positional(2)
+    def _get_products(self, credential, character_id=None):
         """Use credential to retrieve Gloebit user product inventory.
 
         Args:
           credential: Oauth2Credentials object, Gloebit authorization credential
             acquired from 2-step authorization process (oauth2).
+          character_id: Gloebit ID for user's character.
 
         Returns:
           User's product inventory as a dictionary.
@@ -523,22 +523,19 @@ class Gloebit(object):
         response = _success_check(resp, response_json, ProductsAccessError)
         return response['products']
 
-
     @util.positional(2)
     def user_products(self, credential):
         """ list products associated with a gloebit user """
-        return self.get_products (credential, None)
-
+        return self._get_products(credential)
 
     @util.positional(3)
     def character_products(self, credential, character_id):
         """ list products associated with a gloebit user """
-        return self.get_products (credential, character_id)
+        return self._get_products(credential, character_id=character_id)
 
-
-    @util.positional(4)
-    def purchase_product(self, credential, character_id, product,
-                         product_quantity=1, username=None):
+    @util.positional(3)
+    def _purchase_product(self, credential, product,
+                          product_quantity=1, character_id=None, username=None):
         """Use credential to buy product via Gloebit.
 
         This method is for purchasing a product that the merchant has added
@@ -552,6 +549,7 @@ class Gloebit(object):
           product: string, Merchant's name for product being purchased.  Needs
             to match name on merchant products page.
           product_quantity: integer, Product quantity to purchase.
+          character_id: Gloebit ID for user's character.
           username: string, Merchant's ID/name for purchaser.  If not given and
             'user' is in merchant's Gloebit scope, will look up user's name and
             use that in purchase request.  If not given and 'user' is not in
@@ -592,11 +590,9 @@ class Gloebit(object):
             # 'asset-cancel-hold-url':       None,
             # 'gloebit-recipient-user-name': None,
             'consumer-key':                self.client_id,
-            'merchant-user-id':            username,
+            'character-id':                character_id,
+            'username-on-application':     username,
         }
-
-        if character_id:
-            transaction['character-id'] = character_id
 
         access_token = credential.access_token
 
@@ -617,26 +613,22 @@ class Gloebit(object):
         remaining = response.get('product-count', None)
         return (balance, remaining)
 
-
     @util.positional(3)
     def purchase_user_product(self, credential, product,
                               product_quantity=1, username=None):
         """ purchase a product for a user """
-        return self.purchase_product(credential, None, product,
-                                     product_quantity=product_quantity,
-                                     username=username)
-
-
+        return self._purchase_product(credential, product,
+                                      product_quantity=product_quantity,
+                                      username=username)
 
     @util.positional(4)
     def purchase_character_product(self, credential, character_id, product,
                                    product_quantity=1, username=None):
         """ purchase a product for a character """
-        return self.purchase_product(credential, character_id, product,
-                                     product_quantity=product_quantity,
-                                     username=username)
-
-
+        return self._purchase_product(credential, product,
+                                      product_quantity=product_quantity,
+                                      character_id=character_id,
+                                      username=username)
 
     @util.positional(4)
     def consume_product(self, credential, character_id, product,
@@ -686,13 +678,11 @@ class Gloebit(object):
 
         return response.get('product-count', None)
 
-
     @util.positional(4)
     def consume_user_product(self, credential, product, product_quantity=1):
         """ decrement product count for a user """
         return self.consume_product(credential, None, product,
                                     product_quantity)
-
 
     @util.positional(4)
     def consume_character_product(self, credential, character_id, product,
@@ -701,11 +691,9 @@ class Gloebit(object):
         return self.consume_product(credential, character_id, product,
                                     product_quantity)
 
-
-
-    @util.positional(4)
-    def grant_product(self, credential, character_id,
-                      product, product_quantity=1):
+    @util.positional(3)
+    def _grant_product(self, credential product,
+                       product_quantity=1, character_id=character_id):
         """Use credential to grant user's product(s) via Gloebit.
 
         This method is for consuming (deleting) one or more of a product that
@@ -751,22 +739,19 @@ class Gloebit(object):
 
         return response.get('product-count', None)
 
-
-    @util.positional(4)
+    @util.positional(3)
     def grant_user_product(self, credential, product, product_quantity=1):
         """ increment count of user product """
-        return self.grant_product(credential, None,
-                                  product, product_quantity=product_quantity)
-
+        return self._grant_product(credential, product,
+                                   product_quantity=product_quantity)
 
     @util.positional(4)
-    def grant_character_product(self, credential, character_id,
-                                product, product_quantity=1):
+    def grant_character_product(self, credential, character_id, product,
+                                product_quantity=1):
         """ increment count of character product """
-        return self.grant_product(credential, character_id,
-                                  product, product_quantity=product_quantity)
-
-
+        return self._grant_product(credential, product,
+                                   product_quantity=product_quantity,
+                                   character_id=character_id)
 
     @util.positional(2)
     def user_characters(self, credential):
@@ -802,8 +787,6 @@ class Gloebit(object):
 
         response = _success_check(resp, response_json, CharacterAccessError)
         return response['characters']
-
-
 
     @util.positional(3)
     def create_character(self, credential, character):
@@ -846,8 +829,6 @@ class Gloebit(object):
         response = _success_check(resp, response_json, CharacterAccessError)
         return response['character']
 
-
-
     @util.positional(3)
     def update_character(self, credential, character):
         """Use credential to update Gloebit user character.
@@ -889,7 +870,6 @@ class Gloebit(object):
         response = _success_check(resp, response_json, CharacterAccessError)
         return response['character']
 
-
     @util.positional(3)
     def delete_character(self, credential, character_id):
         """Use credential to delete a user's character
@@ -925,8 +905,6 @@ class Gloebit(object):
 
         response = _success_check(resp, response_json, CharacterAccessError)
         return response['success']
-
-
 
 def _success_check(resp, response_json, exception):
     """Check response and body for success or failure.
